@@ -13,6 +13,7 @@ import paymentRoutes from './routes/paymentRoutes.js';
 import reportRoutes from './routes/reportRoutes.js';
 import messageRoutes from './routes/messageRoutes.js';
 import { generateAndSendMonthlyReports } from './controllers/automatedReportController.js';
+import { ensureAdminSchema } from './controllers/adminController.js';
 
 dotenv.config();
 
@@ -84,8 +85,16 @@ async function start() {
   try {
     await pool.query('SELECT 1');
     console.log('Connected to MySQL (amatalink) successfully');
+    try {
+      await ensureAdminSchema();
+    } catch (migrationErr) {
+      console.error('Admin schema migration failed:', migrationErr.message || migrationErr);
+    }
   } catch (err) {
     console.error('Unable to connect to MySQL:', err.message || err);
+    console.error(
+      'Set DB_HOST, DB_USER, DB_PASSWORD, DB_NAME in Render Environment (use your cloud MySQL hostname, not localhost).'
+    );
   }
 
   app.listen(PORT, () => {

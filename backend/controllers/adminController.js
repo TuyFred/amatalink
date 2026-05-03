@@ -1,40 +1,40 @@
 import pool from '../config/database.js';
 import { sendRegistrationStatusEmail, sendPriceChangeEmail } from './emailUtils.js';
 
-// Persistent settings table (single row config)
-await pool.execute(`
-  CREATE TABLE IF NOT EXISTS settings (
-    id INT PRIMARY KEY,
-    milkPricePerLiter DECIMAL(10,2) DEFAULT 500.00,
-    siteName VARCHAR(255) DEFAULT 'AmataLink',
-    defaultCurrency VARCHAR(10) DEFAULT 'RWF',
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-  )
-`);
-await pool.execute('INSERT IGNORE INTO settings (id) VALUES (1)');
-
-// Auto-migrate: add collector_id to farmers table (ownership link)
-const [[{ cnt: collectorIdCol }]] = await pool.query(
-  `SELECT COUNT(*) as cnt FROM information_schema.COLUMNS
-   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'farmers' AND COLUMN_NAME = 'collector_id'`
-);
-if (collectorIdCol === 0) {
-  await pool.execute('ALTER TABLE farmers ADD COLUMN collector_id INT NULL');
-  console.log('[Migration] Added farmers.collector_id column');
-}
-
-// Ensure existing farmers have a collector_id (backfill via sector match)
-const [[{ nullCount }]] = await pool.query('SELECT COUNT(*) as nullCount FROM farmers WHERE collector_id IS NULL');
-if (nullCount > 0) {
+/** Run once at server startup (not at import time) so the process can boot even if DB is temporarily down. */
+export async function ensureAdminSchema() {
   await pool.execute(`
-    UPDATE farmers f
-    JOIN users u_f ON f.user_id = u_f.id
-    JOIN users u_c ON u_f.sector <=> u_c.sector AND u_c.role = 'collector'
-    JOIN collectors c ON u_c.id = c.user_id
-    SET f.collector_id = c.id
-    WHERE f.collector_id IS NULL
+    CREATE TABLE IF NOT EXISTS settings (
+      id INT PRIMARY KEY,
+      milkPricePerLiter DECIMAL(10,2) DEFAULT 500.00,
+      siteName VARCHAR(255) DEFAULT 'AmataLink',
+      defaultCurrency VARCHAR(10) DEFAULT 'RWF',
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
   `);
-  console.log(`[Migration] Backfilled ${nullCount} farmers via sector match`);
+  await pool.execute('INSERT IGNORE INTO settings (id) VALUES (1)');
+
+  const [[{ cnt: collectorIdCol }]] = await pool.query(
+    `SELECT COUNT(*) as cnt FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'farmers' AND COLUMN_NAME = 'collector_id'`
+  );
+  if (collectorIdCol === 0) {
+    await pool.execute('ALTER TABLE farmers ADD COLUMN collector_id INT NULL');
+    console.log('[Migration] Added farmers.collector_id column');
+  }
+
+  const [[{ nullCount }]] = await pool.query('SELECT COUNT(*) as nullCount FROM farmers WHERE collector_id IS NULL');
+  if (nullCount > 0) {
+    await pool.execute(`
+      UPDATE farmers f
+      JOIN users u_f ON f.user_id = u_f.id
+      JOIN users u_c ON u_f.sector <=> u_c.sector AND u_c.role = 'collector'
+      JOIN collectors c ON u_c.id = c.user_id
+      SET f.collector_id = c.id
+      WHERE f.collector_id IS NULL
+    `);
+    console.log(`[Migration] Backfilled ${nullCount} farmers via sector match`);
+  }
 }
 
 // Get settings from DB
