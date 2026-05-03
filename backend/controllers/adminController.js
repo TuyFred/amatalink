@@ -14,6 +14,14 @@ export async function ensureAdminSchema() {
   `);
   await pool.execute('INSERT IGNORE INTO settings (id) VALUES (1)');
 
+  const [[{ farmersTable }]] = await pool.query(
+    `SELECT COUNT(*) as farmersTable FROM information_schema.tables
+     WHERE table_schema = DATABASE() AND table_name = 'farmers'`
+  );
+  if (farmersTable === 0) {
+    return;
+  }
+
   const [[{ cnt: collectorIdCol }]] = await pool.query(
     `SELECT COUNT(*) as cnt FROM information_schema.COLUMNS
      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'farmers' AND COLUMN_NAME = 'collector_id'`

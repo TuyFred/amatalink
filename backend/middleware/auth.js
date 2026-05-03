@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'amatalink_secret_key_2024';
+const JWT_SECRET = (process.env.JWT_SECRET && String(process.env.JWT_SECRET).trim()) || 'amatalink_secret_key_2024';
 
 export const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];

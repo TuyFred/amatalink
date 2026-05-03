@@ -12,6 +12,9 @@ const poolConfig = {
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
+  // Avoid BigInt in row values (breaks res.json on login /me, etc.)
+  supportBigNumbers: true,
+  bigNumberStrings: true,
 };
 
 if (useSsl) {

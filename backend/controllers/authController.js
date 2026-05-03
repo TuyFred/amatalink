@@ -2,8 +2,9 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import pool from '../config/database.js';
 import { sendVerificationEmail, sendResetPasswordEmail, sendRegistrationPendingEmail } from './emailUtils.js';
+import { asInt, storedPasswordHash, loginUserPayload, meUserPayload } from '../utils/dbRow.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'amatalink_secret_key_2024';
+const JWT_SECRET = (process.env.JWT_SECRET && String(process.env.JWT_SECRET).trim()) || 'amatalink_secret_key_2024';
 
 // Register new user (user selects role, admin/collector approves later)
 export const register = async (req, res) => {
@@ -43,7 +44,7 @@ export const register = async (req, res) => {
       [username, email, hashedPassword, fullName, phone, role, village || null, sector || null, 'pending', code]
     );
 
-    const userId = result.insertId;
+    const userId = asInt(result.insertId);
 
     // Send registration pending email
     await sendRegistrationPendingEmail(email, fullName);
@@ -51,7 +52,7 @@ export const register = async (req, res) => {
     const response = {
       message: 'Your registration request has been submitted. Please wait for admin approval.',
       userId,
-      ...(process.env.NODE_ENV !== 'production' ? { verificationCode: code } : {})
+      ...(process.env.NODE_ENV !== 'production' ? { verificationCode: code } : {}),
     };
     console.log('New pending user:', email);
     res.status(201).json(response);
@@ -74,9 +75,9 @@ export const login = async (req, res) => {
       return res.status(400).json({ message: 'Izina ukoresha cg imeri bikenewe' });
     }
 
-    // Get user by username OR email
     const [users] = await pool.execute(
-      'SELECT * FROM users WHERE username = ? OR email = ?',
+      `SELECT id, username, email, password, full_name, phone, role, village, sector, status
+       FROM users WHERE username = ? OR email = ?`,
       [identifier, identifier]
     );
 
@@ -86,8 +87,19 @@ export const login = async (req, res) => {
 
     const user = users[0];
 
-    // Check password first
-    const isMatch = await bcrypt.compare(password, user.password);
+    const hash = storedPasswordHash(user.password);
+    if (!hash || !hash.startsWith('$2')) {
+      console.error('Login: user id %s has missing or non-bcrypt password hash', user.id);
+      return res.status(401).json({ message: 'Izina ukoresha cg password ntabwo bihuye' });
+    }
+
+    let isMatch = false;
+    try {
+      isMatch = await bcrypt.compare(String(password), hash);
+    } catch (bcryptErr) {
+      console.error('Login bcrypt error:', bcryptErr.message || bcryptErr);
+      return res.status(401).json({ message: 'Izina ukoresha cg password ntabwo bihuye' });
+    }
     if (!isMatch) {
       return res.status(401).json({ message: 'Izina ukoresha cg password ntabwo bihuye' });
     }
@@ -104,7 +116,7 @@ export const login = async (req, res) => {
 
     // Generate token
     const token = jwt.sign(
-      { id: user.id, username: user.username, role: user.role },
+      { id: asInt(user.id), username: user.username, role: user.role },
       JWT_SECRET,
       { expiresIn: '24h' }
     );
@@ -112,19 +124,10 @@ export const login = async (req, res) => {
     res.json({
       message: 'Login successful.',
       token,
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        fullName: user.full_name,
-        phone: user.phone,
-        role: user.role,
-        village: user.village,
-        sector: user.sector
-      }
+      user: loginUserPayload(user),
     });
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('Login error:', error.code || '', error.sqlMessage || error.message || error);
     res.status(500).json({ message: 'Ibyago mu byakozwe' });
   }
 };
@@ -160,7 +163,7 @@ export const verifyEmail = async (req, res) => {
 
     // Generate token
     const token = jwt.sign(
-      { id: user.id, username: user.username, role: user.role },
+      { id: asInt(user.id), username: user.username, role: user.role },
       JWT_SECRET,
       { expiresIn: '24h' }
     );
@@ -168,16 +171,7 @@ export const verifyEmail = async (req, res) => {
     res.json({
       message: 'Your account has been verified successfully.',
       token,
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        fullName: user.full_name,
-        phone: user.phone,
-        role: user.role,
-        village: user.village,
-        sector: user.sector
-      }
+      user: loginUserPayload(user),
     });
   } catch (error) {
     console.error('Verify email error:', error);
@@ -197,7 +191,7 @@ export const getCurrentUser = async (req, res) => {
       return res.status(404).json({ message: 'Umushinga wifashisho ntaraboneka' }); // User not found
     }
 
-    res.json(users[0]);
+    res.json(meUserPayload(users[0]));
   } catch (error) {
     console.error('Get user error:', error);
     res.status(500).json({ message: 'Ibyago mu byakozwe' });

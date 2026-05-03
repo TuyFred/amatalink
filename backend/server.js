@@ -14,6 +14,7 @@ import reportRoutes from './routes/reportRoutes.js';
 import messageRoutes from './routes/messageRoutes.js';
 import { generateAndSendMonthlyReports } from './controllers/automatedReportController.js';
 import { ensureAdminSchema } from './controllers/adminController.js';
+import { ensureCoreSchema } from './migrations/ensureCoreSchema.js';
 
 dotenv.config();
 
@@ -86,9 +87,10 @@ async function start() {
     await pool.query('SELECT 1');
     console.log('Connected to MySQL (amatalink) successfully');
     try {
+      await ensureCoreSchema();
       await ensureAdminSchema();
     } catch (migrationErr) {
-      console.error('Admin schema migration failed:', migrationErr.message || migrationErr);
+      console.error('Schema migration failed:', migrationErr.message || migrationErr);
     }
   } catch (err) {
     console.error('Unable to connect to MySQL:', err.message || err);
