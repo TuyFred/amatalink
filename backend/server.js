@@ -87,9 +87,19 @@ app.get('/api/health/db', async (req, res) => {
     await pool.query('SELECT 1 AS ping');
     out.mysql = true;
   } catch (e) {
-    out.hint =
-      'MySQL unreachable. On Render set DB_HOST, DB_USER, DB_PASSWORD, DB_NAME. Use your provider hostname (not localhost unless it is the same private network).';
     out.errorCode = e.code;
+    if (e.code === 'ENOTFOUND') {
+      out.hint =
+        'DNS could not resolve DB_HOST (ENOTFOUND). Use only the database hostname from your provider (e.g. dbc-xx.aws.region.rds.amazonaws.com). Do not paste https:// or jdbc:mysql:// — or put the full mysql:// URL; the app will parse it. Fix the value in Render → Environment → DB_HOST, then redeploy.';
+    } else if (e.code === 'ECONNREFUSED') {
+      out.hint =
+        'Connection refused (wrong host/port or MySQL not listening). Check DB_HOST, DB_PORT (default 3306), and that your database allows connections from Render\'s IPs (or use "public" access if your provider requires it).';
+    } else if (e.code === 'ER_ACCESS_DENIED_ERROR') {
+      out.hint = 'MySQL rejected DB_USER / DB_PASSWORD. Fix credentials in Render Environment.';
+    } else {
+      out.hint =
+        'MySQL unreachable. On Render set DB_HOST, DB_USER, DB_PASSWORD, DB_NAME. Host must be reachable from the internet (not localhost unless MySQL is on the same private network).';
+    }
     return res.status(503).json(out);
   }
 
