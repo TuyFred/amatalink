@@ -75,6 +75,73 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'AmataLink API irakora neza' });
 });
 
+/** Deep check: MySQL + users table + columns required for auth (no secrets). */
+app.get('/api/health/db', async (req, res) => {
+  const out = {
+    ok: false,
+    mysql: false,
+    usersTable: false,
+    allRequiredColumnsPresent: false,
+  };
+  try {
+    await pool.query('SELECT 1 AS ping');
+    out.mysql = true;
+  } catch (e) {
+    out.hint =
+      'MySQL unreachable. On Render set DB_HOST, DB_USER, DB_PASSWORD, DB_NAME. Use your provider hostname (not localhost unless it is the same private network).';
+    out.errorCode = e.code;
+    return res.status(503).json(out);
+  }
+
+  try {
+    const [[t]] = await pool.query(
+      "SELECT COUNT(*) AS c FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'users'"
+    );
+    out.usersTable = Number(t.c) > 0;
+    if (!out.usersTable) {
+      out.hint =
+        'Database has no `users` table. Deploy the latest backend (ensureCoreSchema runs on startup) or import your schema.';
+      return res.status(503).json(out);
+    }
+
+    const [cols] = await pool.query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'`
+    );
+    const names = new Set(cols.map((c) => c.COLUMN_NAME));
+    const required = [
+      'id',
+      'username',
+      'email',
+      'password',
+      'full_name',
+      'phone',
+      'role',
+      'status',
+      'email_verified',
+      'verification_code',
+      'verification_expires',
+      'reset_code',
+      'reset_expires',
+    ];
+    out.columns = {};
+    for (const n of required) {
+      out.columns[n] = names.has(n);
+    }
+    out.allRequiredColumnsPresent = required.every((n) => names.has(n));
+    out.ok = out.mysql && out.usersTable && out.allRequiredColumnsPresent;
+    if (!out.allRequiredColumnsPresent) {
+      out.hint =
+        'users table is missing columns needed for login / password reset. Redeploy latest backend or run migrations.';
+    }
+    return res.status(out.ok ? 200 : 503).json(out);
+  } catch (e) {
+    out.errorCode = e.code;
+    out.hint = e.sqlMessage || e.message;
+    return res.status(503).json(out);
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);

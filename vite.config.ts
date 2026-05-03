@@ -4,6 +4,10 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
+  build: {
+    // Build is healthy; large bundle is expected until code-splitting — avoid false "error" noise
+    chunkSizeWarningLimit: 1600,
+  },
   server: {
     host: true,
     port: 5173,

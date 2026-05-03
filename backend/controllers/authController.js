@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import pool from '../config/database.js';
 import { sendVerificationEmail, sendResetPasswordEmail, sendRegistrationPendingEmail } from './emailUtils.js';
-import { asInt, storedPasswordHash, loginUserPayload, meUserPayload } from '../utils/dbRow.js';
+import { asInt, rowText, storedPasswordHash, loginUserPayload, meUserPayload } from '../utils/dbRow.js';
 
 const JWT_SECRET = (process.env.JWT_SECRET && String(process.env.JWT_SECRET).trim()) || 'amatalink_secret_key_2024';
 
@@ -74,6 +74,9 @@ export const login = async (req, res) => {
     if (!identifier) {
       return res.status(400).json({ message: 'Izina ukoresha cg imeri bikenewe' });
     }
+    if (password == null || password === '') {
+      return res.status(400).json({ message: 'Ijambo ry\'ibanga rirakenewe' });
+    }
 
     const [users] = await pool.execute(
       `SELECT id, username, email, password, full_name, phone, role, village, sector, status
@@ -114,12 +117,17 @@ export const login = async (req, res) => {
       return res.status(403).json({ message: 'Your account registration was rejected. Please contact the administrator.', status: 'rejected' });
     }
 
-    // Generate token
-    const token = jwt.sign(
-      { id: asInt(user.id), username: user.username, role: user.role },
-      JWT_SECRET,
-      { expiresIn: '24h' }
-    );
+    let token;
+    try {
+      token = jwt.sign(
+        { id: asInt(user.id), username: rowText(user.username), role: rowText(user.role) },
+        JWT_SECRET,
+        { expiresIn: '24h' }
+      );
+    } catch (jwtErr) {
+      console.error('Login JWT error:', jwtErr.message || jwtErr);
+      return res.status(500).json({ message: 'Ibyago mu byakozwe' });
+    }
 
     res.json({
       message: 'Login successful.',
@@ -158,12 +166,11 @@ export const verifyEmail = async (req, res) => {
     // Mark as verified
     await pool.execute(
       'UPDATE users SET email_verified = 1, verification_code = NULL, verification_expires = NULL WHERE id = ?',
-      [user.id]
+      [asInt(user.id)]
     );
 
-    // Generate token
     const token = jwt.sign(
-      { id: asInt(user.id), username: user.username, role: user.role },
+      { id: asInt(user.id), username: rowText(user.username), role: rowText(user.role) },
       JWT_SECRET,
       { expiresIn: '24h' }
     );
@@ -257,32 +264,39 @@ export const forgotPassword = async (req, res) => {
       return res.status(400).json({ message: 'Imeri irakenewe' }); // Email required
     }
 
-    // Find user by email
-    const [users] = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
+    const [users] = await pool.execute(
+      'SELECT id, email, full_name FROM users WHERE email = ?',
+      [email]
+    );
     if (users.length === 0) {
       return res.status(404).json({ message: 'Nta konti yabonetse kuri iyi imeri' }); // No account found
     }
 
     const user = users[0];
 
-    // Generate 6-digit code
     const code = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Update user with reset code and expiry (15 mins)
     await pool.execute(
       'UPDATE users SET reset_code = ?, reset_expires = DATE_ADD(NOW(), INTERVAL 15 MINUTE) WHERE id = ?',
-      [code, user.id]
+      [code, asInt(user.id)]
     );
 
-    // Send email
-    await sendResetPasswordEmail(email, code, user.full_name);
+    try {
+      await sendResetPasswordEmail(email, code, rowText(user.full_name));
+    } catch (emailErr) {
+      console.error('Forgot password email error:', emailErr.message || emailErr);
+      return res.status(503).json({
+        message:
+          'Database updated but email could not be sent. Set BREVO_API_KEY / FROM_EMAIL on Render or try again later.',
+      });
+    }
 
     res.json({
       message: 'Imibare y\'ibanga yo guhindura ijambo ry\'ibanga yoherejwe kuri imeri yawe.',
-      ...(process.env.NODE_ENV !== 'production' ? { resetCode: code } : {})
+      ...(process.env.NODE_ENV !== 'production' ? { resetCode: code } : {}),
     });
   } catch (error) {
-    console.error('Forgot password error:', error);
+    console.error('Forgot password error:', error.code || '', error.sqlMessage || error.message || error);
     res.status(500).json({ message: 'Ibyago mu byakozwe' });
   }
 };
