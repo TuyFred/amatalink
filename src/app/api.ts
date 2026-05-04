@@ -1,6 +1,9 @@
+const explicitApiUrl = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '');
+
+// In production on Vercel, default to same-origin `/api` and let vercel.json proxy to Render.
+// This avoids client-side DNS issues like ERR_NAME_NOT_RESOLVED to the Render hostname.
 export const API_BASE_URL =
-    (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ||
-    'http://localhost:5000/api';
+    explicitApiUrl || (import.meta.env.PROD ? '/api' : 'http://localhost:5000/api');
 
 export const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
     const token = localStorage.getItem('amatalink_token');
